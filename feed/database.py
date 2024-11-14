@@ -4,7 +4,7 @@ def init_db():
     conn = sqlite3.connect('newsfeed.db')
     c = conn.cursor()
 
-    # Create the posts table if it doesn't exist
+    # Create the posts table
     c.execute('''
         CREATE TABLE IF NOT EXISTS posts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -14,7 +14,7 @@ def init_db():
         )
     ''')
 
-    # Create the interactions table if it doesn't exist
+    # Create the interactions table 
     c.execute('''
         CREATE TABLE IF NOT EXISTS interactions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,3 +57,11 @@ def get_user_interactions(user):
     interactions = [row[0] for row in c.fetchall()]
     conn.close()
     return interactions
+
+def get_likes_count():
+    conn = sqlite3.connect('newsfeed.db')
+    c = conn.cursor()
+    c.execute("SELECT post_id, COUNT(*) as like_count FROM interactions WHERE action = 'like' GROUP BY post_id")
+    like_counts = c.fetchall()
+    conn.close()
+    return like_counts
