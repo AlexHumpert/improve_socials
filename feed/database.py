@@ -1,4 +1,9 @@
+import os
 import sqlite3
+
+# Define the path for the database relative to the current file location
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, 'newsfeed.db')
 
 def init_db():
     conn = sqlite3.connect('newsfeed.db')
