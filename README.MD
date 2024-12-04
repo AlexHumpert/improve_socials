@@ -67,3 +67,26 @@ Usage Insights
 - App showing social usage of users in aggregate I want to see usage behavior of different demographics.
     - i.e. usage during night time by different demographics
     - "We will publish a simple set of data of what time kids are online. If they are serious about this problem, doesn't violate anyones privacy. As long as they refuse to publish any basic data, we should consider all these moves marketing."
+
+
+
+Feature Backlog:(in no particular order) 
+4. Make recommender algorithmic (baby vs large)... blocker is data
+3. DATA Million high quality algorithmsa (where do these datasets already exist)
+
+
+1. User selector (impersonation box)
+2. Pages
+6. Log-in page
+
+
+
+5. Deploy on Cloud Run
+7. Host on GCP w/database (firestore document store)
+
+Trello Board
+1. Prioritize tasks there (thin matrix game deveoper)
+
+
+Don't re-invent the wheel
+- Look at best algorithms from existing companies and replicate their baby version of that
