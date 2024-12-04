@@ -40,10 +40,18 @@ def add_post(user, content):
     conn.commit()
     conn.close()
 
+#def get_posts():
+ #   conn = sqlite3.connect('newsfeed.db')
+  #  c = conn.cursor()
+   # c.execute("SELECT user, content, timestamp FROM posts ORDER BY timestamp DESC")
+   # posts = c.fetchall()
+   # conn.close()
+   # return posts
+
 def get_posts():
     conn = sqlite3.connect('newsfeed.db')
     c = conn.cursor()
-    c.execute("SELECT user, content, timestamp FROM posts ORDER BY timestamp DESC")
+    c.execute("SELECT id, user, content, timestamp FROM posts ORDER BY timestamp DESC")  # Add id to SELECT
     posts = c.fetchall()
     conn.close()
     return posts

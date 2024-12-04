@@ -7,12 +7,11 @@ from sklearn.metrics.pairwise import cosine_similarity
 # Initialize the database
 init_db()
 
-# Function to load all posts into a DataFrame
 def load_posts_df():
     posts = get_posts()
-    df = pd.DataFrame(posts, columns=['user', 'content', 'timestamp'])
-    df['post_id'] = df.index + 1  # Assign a post_id starting from 1
+    df = pd.DataFrame(posts, columns=['post_id', 'user', 'content', 'timestamp'])  # Include post_id from database
     return df
+
 
 def get_recommended_posts(user, num_recommendations=5):
     posts_df = load_posts_df()
@@ -26,8 +25,8 @@ def get_recommended_posts(user, num_recommendations=5):
     like_counts = get_likes_count()
     like_counts_df = pd.DataFrame(like_counts, columns=['post_id', 'like_count'])
 
-    # Filter posts that the user has liked
-    liked_posts_df = posts_df[posts_df['post_id'].isin(user_interactions)]
+    # Filter posts that the user has NOT liked
+    liked_posts_df = posts_df[~posts_df['post_id'].isin(user_interactions)]
 
     # Merge the like counts with the liked posts
     liked_posts_with_counts = liked_posts_df.merge(like_counts_df, on='post_id', how='left')
