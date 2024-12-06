@@ -1,2 +1,9 @@
 #pdfs
 articles/*
+
+
+#cache and system files
+.DS_Store
+.vscode/launch.json
+feed/newsfeed.db
+feed/__pycache__/*
