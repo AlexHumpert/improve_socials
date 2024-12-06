@@ -25,11 +25,16 @@ def get_recommended_posts(user, num_recommendations=5):
     like_counts = get_likes_count()
     like_counts_df = pd.DataFrame(like_counts, columns=['post_id', 'like_count'])
 
-    # Filter posts that the user has NOT liked
-    liked_posts_df = posts_df[~posts_df['post_id'].isin(user_interactions)]
+    # Filter out:
+    # 1. Posts the user has already interacted with
+    # 2. Posts created by the user themselves
+    filtered_posts_df = posts_df[
+        (~posts_df['post_id'].isin(user_interactions)) & 
+        (posts_df['user'] != user)
+    ]
 
     # Merge the like counts with the liked posts
-    liked_posts_with_counts = liked_posts_df.merge(like_counts_df, on='post_id', how='left')
+    liked_posts_with_counts = filtered_posts_df.merge(like_counts_df, on='post_id', how='left')
     
     # Sort by the like count in descending order
     liked_posts_with_counts = liked_posts_with_counts.sort_values(by='like_count', ascending=False)
