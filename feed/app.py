@@ -1,8 +1,9 @@
 import streamlit as st
 import pandas as pd
-from database import init_db, add_post, get_posts, add_interaction, get_user_interactions, get_likes_count
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+from database import (
+    init_db, add_post, get_posts, add_interaction, get_user_interactions, 
+    get_likes_count, create_user, verify_user, get_user_profile, update_user_profile
+)
 
 # Initialize the database
 init_db()
@@ -42,50 +43,116 @@ def get_recommended_posts(user, num_recommendations=5):
     # Return the top N recommended posts
     return liked_posts_with_counts.head(num_recommendations)
 
-# Streamlit App
-st.title("Simple Newsfeed")
+# Initialize session state variables
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = False
+if 'username' not in st.session_state:
+    st.session_state.username = None
 
-# Form to add a new post
-with st.form("post_form"):
-    user = st.text_input("Name", max_chars=20)
-    content = st.text_area("What's on your mind?", max_chars=280)
-    submit = st.form_submit_button("Post")
+def login_user(username, password):
+    if verify_user(username, password):
+        st.session_state.logged_in = True
+        st.session_state.username = username
+        return True
+    return False
 
-    if submit and user and content:
-        add_post(user, content)
-        st.success("Post added successfully!")
+def logout_user():
+    st.session_state.logged_in = False
+    st.session_state.username = None
 
-st.subheader("Newsfeed")
-posts = get_posts()
+# Authentication UI
+if not st.session_state.logged_in:
+    st.title("Welcome to the Recommender Testing Platform")
+    
+    tab1, tab2 = st.tabs(["Login", "Sign Up"])
+    
+    with tab1:
+        with st.form("login_form"):
+            username = st.text_input("Username")
+            password = st.text_input("Password", type="password")
+            submit = st.form_submit_button("Login")
+            
+            if submit:
+                if login_user(username, password):
+                    st.success("Logged in successfully!")
+                    st.rerun()
+                else:
+                    st.error("Invalid username or password")
+    
+    with tab2:
+        with st.form("signup_form"):
+            new_username = st.text_input("Choose Username")
+            new_password = st.text_input("Choose Password", type="password")
+            display_name = st.text_input("Display Name (optional)")
+            bio = st.text_area("Bio (optional)")
+            signup = st.form_submit_button("Sign Up")
+            
+            if signup:
+                if create_user(new_username, new_password, display_name, bio):
+                    st.success("Account created successfully! Please log in.")
+                else:
+                    st.error("Username already exists")
 
-# Display posts
-if posts:
-    posts_df = load_posts_df()
-    for i, row in posts_df.iterrows():
-        st.markdown(f"**{row['user']}** at {row['timestamp']}")
-        st.write(row['content'])
-        
-        # Add a like button
-        if st.button(f"Like post {row['post_id']}", key=f"like_{row['post_id']}"):
-            add_interaction(user, row['post_id'], 'like')
-            st.success(f"You liked post {row['post_id']}!")
-        st.markdown("---")
 else:
-    st.info("No posts yet. Be the first to share!")
+    # Show logout button in sidebar
+    with st.sidebar:
+        st.write(f"Logged in as: {st.session_state.username}")
+        if st.button("Logout"):
+            logout_user()
+            st.rerun()
+        
+        # Profile section in sidebar
+        st.subheader("Your Profile")
+        profile = get_user_profile(st.session_state.username)
+        if profile:
+            with st.expander("Edit Profile"):
+                with st.form("profile_form"):
+                    new_display_name = st.text_input("Display Name", value=profile[1])
+                    new_bio = st.text_area("Bio", value=profile[2])
+                    if st.form_submit_button("Update Profile"):
+                        update_user_profile(st.session_state.username, new_display_name, new_bio)
+                        st.success("Profile updated!")
+                        st.rerun()
 
-# Display recommended posts
-st.title("Personalized Newsfeed")
-user = st.text_input("Enter your username", max_chars=20)
+    # Main app content
+    st.title("Recommender Testing Platform")
 
-if user:
-    st.subheader("Recommended for you")
-    recommended_posts = get_recommended_posts(user)
+    # Post creation
+    with st.form("post_form"):
+        content = st.text_area("What's on your mind?", max_chars=280)
+        submit = st.form_submit_button("Post")
+
+        if submit and content:
+            add_post(st.session_state.username, content)
+            st.success("Post added successfully!")
+
+    # Display recommended posts
+    st.subheader("Recommended Posts")
+    recommended_posts = get_recommended_posts(st.session_state.username)
     
     if not recommended_posts.empty:
         for _, row in recommended_posts.iterrows():
             st.markdown(f"**{row['user']}** at {row['timestamp']}")
             st.write(row['content'])
             st.markdown(f"👍 {row['like_count']} likes")
+            
+            if st.button(f"Like", key=f"like_{row['post_id']}"):
+                add_interaction(st.session_state.username, row['post_id'], 'like')
+                st.success("Post liked!")
+                st.rerun()
             st.markdown("---")
     else:
         st.info("No recommendations available. Try liking some posts!")
+
+    # Show all posts
+    st.subheader("All Posts")
+    posts_df = load_posts_df()
+    for _, row in posts_df.iterrows():
+        st.markdown(f"**{row['user']}** at {row['timestamp']}")
+        st.write(row['content'])
+        
+        if st.button(f"Like", key=f"like_all_{row['post_id']}"):
+            add_interaction(st.session_state.username, row['post_id'], 'like')
+            st.success("Post liked!")
+            st.rerun()
+        st.markdown("---")

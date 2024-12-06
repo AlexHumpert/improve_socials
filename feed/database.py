@@ -1,7 +1,7 @@
 import os
 import sqlite3
+from werkzeug.security import generate_password_hash, check_password_hash
 
-# Define the path for the database relative to the current file location
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, 'newsfeed.db')
 
@@ -9,27 +9,40 @@ def init_db():
     conn = sqlite3.connect('newsfeed.db')
     c = conn.cursor()
 
-    # Create the posts table
+    # Create users table
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            username TEXT PRIMARY KEY,
+            password_hash TEXT NOT NULL,
+            display_name TEXT,
+            bio TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    # Create posts table
     c.execute('''
         CREATE TABLE IF NOT EXISTS posts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user TEXT,
             content TEXT,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(user) REFERENCES users(username)
         )
     ''')
-
-    # Create the interactions table 
+    # Create interactions table
     c.execute('''
         CREATE TABLE IF NOT EXISTS interactions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user TEXT,
             post_id INTEGER,
-            action TEXT,  -- Example values: 'view', 'like', 'comment'
+            action TEXT,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(user) REFERENCES users(username),
             FOREIGN KEY(post_id) REFERENCES posts(id)
         )
     ''')
+    
     conn.commit()
     conn.close()
 
@@ -39,14 +52,6 @@ def add_post(user, content):
     c.execute("INSERT INTO posts (user, content) VALUES (?, ?)", (user, content))
     conn.commit()
     conn.close()
-
-#def get_posts():
- #   conn = sqlite3.connect('newsfeed.db')
-  #  c = conn.cursor()
-   # c.execute("SELECT user, content, timestamp FROM posts ORDER BY timestamp DESC")
-   # posts = c.fetchall()
-   # conn.close()
-   # return posts
 
 def get_posts():
     conn = sqlite3.connect('newsfeed.db')
@@ -78,3 +83,53 @@ def get_likes_count():
     like_counts = c.fetchall()
     conn.close()
     return like_counts
+
+def create_user(username, password, display_name=None, bio=None):
+    conn = sqlite3.connect('newsfeed.db')
+    c = conn.cursor()
+    try:
+        password_hash = generate_password_hash(password)
+        c.execute(
+            "INSERT INTO users (username, password_hash, display_name, bio) VALUES (?, ?, ?, ?)",
+            (username, password_hash, display_name or username, bio)
+        )
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+    finally:
+        conn.close()
+
+def verify_user(username, password):
+    conn = sqlite3.connect('newsfeed.db')
+    c = conn.cursor()
+    c.execute("SELECT password_hash FROM users WHERE username = ?", (username,))
+    result = c.fetchone()
+    conn.close()
+    
+    if result and check_password_hash(result[0], password):
+        return True
+    return False
+
+def get_user_profile(username):
+    conn = sqlite3.connect('newsfeed.db')
+    c = conn.cursor()
+    c.execute("SELECT username, display_name, bio, created_at FROM users WHERE username = ?", (username,))
+    profile = c.fetchone()
+    conn.close()
+    return profile
+
+def update_user_profile(username, display_name=None, bio=None):
+    conn = sqlite3.connect('newsfeed.db')
+    c = conn.cursor()
+    if display_name and bio:
+        c.execute("UPDATE users SET display_name = ?, bio = ? WHERE username = ?", 
+                 (display_name, bio, username))
+    elif display_name:
+        c.execute("UPDATE users SET display_name = ? WHERE username = ?", 
+                 (display_name, username))
+    elif bio:
+        c.execute("UPDATE users SET bio = ? WHERE username = ?", 
+                 (bio, username))
+    conn.commit()
+    conn.close()
