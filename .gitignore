@@ -7,3 +7,4 @@ articles/*
 .vscode/launch.json
 feed/newsfeed.db
 feed/__pycache__/*
+.env
