@@ -1,4 +1,3 @@
-# pages/2_recommendations.py
 import streamlit as st
 import pandas as pd
 from database import (
@@ -6,16 +5,28 @@ from database import (
     get_likes_count
 )
 import os
-from openai import OpenAI  # Note the capitalization
+from openai import OpenAI
 from dotenv import load_dotenv
 import pandas as pd
 import sqlite3
 
 # Load environment variables
-load_dotenv()
+load_dotenv(override=True)  # Add override=True to ensure variables are reloaded
+
+# Get API key
+api_key = os.getenv('OPENAI_API_KEY')
+
+# Check if API key is in Streamlit secrets
+if not api_key and 'OPENAI_API_KEY' in st.secrets:
+    api_key = st.secrets['OPENAI_API_KEY']
+
+# Final check and client initialization
+if not api_key:
+    st.error("OpenAI API key not found. Please check your .env file or Streamlit secrets.")
+    st.stop()
 
 # Initialize OpenAI client at the module level
-client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+client = OpenAI(api_key=api_key)
 
 
 def load_posts_df():
