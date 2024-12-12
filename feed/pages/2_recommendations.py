@@ -1,3 +1,5 @@
+# pages/2_recommendations.py
+
 import streamlit as st
 import pandas as pd
 from database import (
@@ -35,14 +37,57 @@ def load_posts_df():
     return df
 
 
-def get_llm_recommended_posts(username, user_bio, posts_df, num_recommendations=5):
+def infer_aspirations_from_bio(username, user_bio): 
+    """
+    Infer information from bio
+    """
+    
+    system_prompt = """You are an experienced life coach who works with clients to support them in their journeys to manifest their live goals.
+    Your task is to identify aspirational goals from the information your clients give you."""
+
+    user_prompt = f"""Based on this user's bio: identify aspirational goals.
+
+User: {username if username else 'No bio provided'}
+User Bio: {user_bio if user_bio else 'No bio provided'}"""
+
+    try:
+        # Verify API key is set
+        if not os.getenv('OPENAI_API_KEY'):
+            print("OpenAI API key is not set!")
+            return pd.DataFrame()
+            
+        response = client.chat.completions.create(
+            model = "gpt-4o",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": user_prompt}
+                    ]
+                }
+            ],
+            max_tokens=2000
+        )      
+    
+        # Get the reponse content
+        user_aspirations = response.choices[0].message.content
+        print(f"GPT-4o response: {user_aspirations}")
+        return user_aspirations
+    
+    except Exception as e:
+        print(f"Error in LLM recommendation: {str(e)}")
+        return None
+
+
+def get_llm_recommended_posts(username, user_aspirations, user_bio, posts_df, num_recommendations=5):
     """
     Get post recommendations for a user based on their bio using GPT-4.
     """
     print(f"Starting LLM recommendations for user: {username}")
     print(f"User bio: {user_bio}")
     print(f"Total posts available before filtering: {len(posts_df)}")
-    
+
     # Filter out user's own posts
     other_posts = posts_df[posts_df['user'] != username].copy()
     print(f"Posts after filtering out user's own posts: {len(other_posts)}")
@@ -58,12 +103,13 @@ def get_llm_recommended_posts(username, user_bio, posts_df, num_recommendations=
     ])
     
     system_prompt = """You are a recommendation system that analyzes user interests and content relevance. 
-    Your task is to identify posts that would be most interesting to a user based on their bio.
+    Your task is to identify posts that would be most interesting to a user based on their bio and aspirations.
     You must return only the post numbers, separated by commas."""
 
-    user_prompt = f"""Based on this user's bio, select the {num_recommendations} most relevant posts that would interest them.
+    user_prompt = f"""Based on this user's bio and aspirations, select the {num_recommendations} most relevant posts that would interest them.
     
 User Bio: {user_bio if user_bio else 'No bio provided'}
+User Aspirations: {user_aspirations if user_aspirations else "No user aspirations inferred" }
 
 Available Posts:
 {posts_context}
@@ -138,9 +184,17 @@ def get_recommended_posts(username, num_recommendations=5):
     user_bio = result[0]
     print(f"Retrieved user bio: {user_bio}")
     
+    # Define user aspiration
+
+    user_aspirations = infer_aspirations_from_bio(
+        username=username,
+        user_bio=user_bio
+    )
+
     # Get LLM recommendations
     recommended_posts = get_llm_recommended_posts(
         username=username,
+        user_aspirations=user_aspirations,
         user_bio=user_bio,
         posts_df=posts_df,
         num_recommendations=num_recommendations
