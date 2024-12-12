@@ -79,7 +79,6 @@ User Bio: {user_bio if user_bio else 'No bio provided'}"""
         print(f"Error in LLM recommendation: {str(e)}")
         return None
 
-
 def get_llm_recommended_posts(username, user_aspirations, user_bio, posts_df, num_recommendations=5):
     """
     Get post recommendations for a user based on their bio using GPT-4.
@@ -88,7 +87,8 @@ def get_llm_recommended_posts(username, user_aspirations, user_bio, posts_df, nu
     print(f"User bio: {user_bio}")
     print(f"Total posts available before filtering: {len(posts_df)}")
 
-    # Filter out user's own posts
+    # Filter out user's own posts but keep original post numbers for reference
+    posts_df['original_index'] = range(1, len(posts_df) + 1)  # 1-based index for GPT
     other_posts = posts_df[posts_df['user'] != username].copy()
     print(f"Posts after filtering out user's own posts: {len(other_posts)}")
     
@@ -96,10 +96,10 @@ def get_llm_recommended_posts(username, user_aspirations, user_bio, posts_df, nu
         print("No posts from other users found")
         return pd.DataFrame()
     
-    # Prepare the prompt for GPT-4o
+    # Prepare the prompt using original post numbers
     posts_context = "\n".join([
-        f"Post {idx + 1}: {row['content']}" 
-        for idx, row in other_posts.iterrows()
+        f"Post {row['original_index']}: {row['content']}" 
+        for _, row in other_posts.iterrows()
     ])
     
     system_prompt = """You are a recommendation system that analyzes user interests and content relevance. 
@@ -109,12 +109,13 @@ def get_llm_recommended_posts(username, user_aspirations, user_bio, posts_df, nu
     user_prompt = f"""Based on this user's bio and aspirations, select the {num_recommendations} most relevant posts that would interest them.
     
 User Bio: {user_bio if user_bio else 'No bio provided'}
-User Aspirations: {user_aspirations if user_aspirations else "No user aspirations inferred" }
+User Aspirations: {user_aspirations if user_aspirations else "No user aspirations inferred"}
 
 Available Posts:
 {posts_context}
 
-Return only the post numbers (1-based index) of the {num_recommendations} most relevant posts, separated by commas. For example: "1, 4, 7, 8, 9"
+Return only the post numbers of the {num_recommendations} most relevant posts, separated by commas.
+For example: "1, 4, 7"
 If there are fewer posts available than requested, return all available relevant posts."""
 
     try:
@@ -128,12 +129,7 @@ If there are fewer posts available than requested, return all available relevant
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": system_prompt},
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": user_prompt}
-                    ]
-                }
+                {"role": "user", "content": user_prompt}
             ],
             max_tokens=2000
         )
@@ -142,25 +138,27 @@ If there are fewer posts available than requested, return all available relevant
         response_content = response.choices[0].message.content
         print(f"GPT-4o response: {response_content}")
         
-        # Parse the response
-        recommended_indices = [
-            int(idx.strip()) - 1 
+        # Parse the response to get recommended post numbers
+        recommended_post_numbers = [
+            int(idx.strip())
             for idx in response_content.replace(" ", "").split(",")
             if idx.strip().isdigit()
         ]
         
-        print(f"Parsed indices: {recommended_indices}")
+        print(f"Recommended post numbers: {recommended_post_numbers}")
         
-        # Get the recommended posts
-        recommended_posts = other_posts.iloc[recommended_indices]
+        # Filter posts based on original_index
+        recommended_posts = other_posts[other_posts['original_index'].isin(recommended_post_numbers)]
         print(f"Number of recommended posts: {len(recommended_posts)}")
+        
+        # Drop the temporary original_index column
+        recommended_posts = recommended_posts.drop('original_index', axis=1)
         
         return recommended_posts
         
     except Exception as e:
         print(f"Error in LLM recommendation: {str(e)}")
         return pd.DataFrame()
-
 
 def get_recommended_posts(username, num_recommendations=5):
     """
