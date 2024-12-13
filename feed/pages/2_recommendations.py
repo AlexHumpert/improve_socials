@@ -11,9 +11,13 @@ from openai import OpenAI
 from dotenv import load_dotenv
 import pandas as pd
 import sqlite3
+import tempfile
+from st_audiorec import st_audiorec
+
+
 
 # Load environment variables
-load_dotenv(override=True)  # Add override=True to ensure variables are reloaded
+load_dotenv(override=True)
 
 # Get API key
 api_key = os.getenv('OPENAI_API_KEY')
@@ -30,49 +34,62 @@ if not api_key:
 # Initialize OpenAI client at the module level
 client = OpenAI(api_key=api_key)
 
-
 def load_posts_df():
     posts = get_posts()
     df = pd.DataFrame(posts, columns=['post_id', 'user', 'content', 'timestamp'])
     return df
 
 
-def infer_aspirations_from_bio(username, user_bio): 
-    """
-    Infer information from bio
-    """
+def transcribe_audio(audio_data):
+    """Transcribe audio using OpenAI Whisper API."""
+    if audio_data is None:
+        return None
+        
+    try:
+        # Save audio bytes to a temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_file:
+            tmp_file.write(audio_data)
+            tmp_file_path = tmp_file.name
+            
+        # Transcribe using OpenAI's Whisper
+        with open(tmp_file_path, 'rb') as audio_file:
+            transcript = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file
+            )
+            
+        # Clean up temporary file
+        os.unlink(tmp_file_path)
+        return transcript.text
+        
+    except Exception as e:
+        st.error(f"Error transcribing audio: {str(e)}")
+        return None
+
+
+def infer_aspirations_from_bio(username, user_bio, audio_transcript=None):
+    """Infer information from bio and audio transcript"""
     
-    system_prompt = """You are an experienced life coach who works with clients to support them in their journeys to manifest their live goals.
-    Your task is to identify aspirational goals from the information your clients give you."""
+    system_prompt = """You are an experienced life coach who works with clients to support them in their journeys to manifest their life goals.
+    Your task is to identify aspirational goals from the information your clients give you, including both their written bio and their spoken feelings."""
 
-    user_prompt = f"""Based on this client's biography, identify aspirational goals.
+    user_prompt = f"""Based on this client's biography and their recorded feelings, identify aspirational goals.
 
-User: {username if username else 'No bio provided'}
-User Bio: {user_bio if user_bio else 'No bio provided'}"""
+User: {username if username else 'No username provided'}
+User Bio: {user_bio if user_bio else 'No bio provided'}
+Today's Feelings: {audio_transcript if audio_transcript else 'No audio recording provided'}"""
 
     try:
-        # Verify API key is set
-        if not os.getenv('OPENAI_API_KEY'):
-            print("OpenAI API key is not set!")
-            return pd.DataFrame()
-            
         response = client.chat.completions.create(
-            model = "gpt-4o",
+            model="gpt-4",
             messages=[
                 {"role": "system", "content": system_prompt},
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": user_prompt}
-                    ]
-                }
+                {"role": "user", "content": user_prompt}
             ],
             max_tokens=2000
-        )      
-    
-        # Get the reponse content
+        )
+        
         user_aspirations = response.choices[0].message.content
-        print(f"GPT-4o response: {user_aspirations}")
         return user_aspirations
     
     except Exception as e:
@@ -160,7 +177,7 @@ If there are fewer posts available than requested, return all available relevant
         print(f"Error in LLM recommendation: {str(e)}")
         return pd.DataFrame()
 
-def get_recommended_posts(username, num_recommendations=5):
+def get_recommended_posts(username, num_recommendations=5, audio_transcript=None):
     """
     Get recommended posts for a user.
     """
@@ -183,10 +200,10 @@ def get_recommended_posts(username, num_recommendations=5):
     print(f"Retrieved user bio: {user_bio}")
     
     # Define user aspiration
-
     user_aspirations = infer_aspirations_from_bio(
         username=username,
-        user_bio=user_bio
+        user_bio=user_bio,
+        audio_transcript=audio_transcript  # Changed from transcript to audio_transcript
     )
 
     # Get LLM recommendations
@@ -215,29 +232,63 @@ def get_recommended_posts(username, num_recommendations=5):
     
     # Fill NaN like counts with 0
     final_recommendations['like_count'] = final_recommendations['like_count'].fillna(0)
-    
     return final_recommendations
+
+
 
 # Check if user is logged in
 if not st.session_state.get('logged_in', False):
     st.warning("Please log in to access this page.")
     st.stop()
 
+# After the login check and before the audio recording section:
 st.title("Recommendations")
 
-# Display recommended posts
-recommended_posts = get_recommended_posts(st.session_state.username)
+# Initialize session state for handling audio flow
+if 'audio_processed' not in st.session_state:
+    st.session_state.audio_processed = False
+if 'current_transcript' not in st.session_state:
+    st.session_state.current_transcript = None
 
-if not recommended_posts.empty:
-    for _, row in recommended_posts.iterrows():
-        st.markdown(f"**{row['user']}** at {row['timestamp']}")
-        st.write(row['content'])
-        st.markdown(f"👍 {row['like_count']} likes")
-        
-        if st.button(f"Like", key=f"like_{row['post_id']}"):
-            add_interaction(st.session_state.username, row['post_id'], 'like')
-            st.success("Post liked!")
-            st.rerun()
-        st.markdown("---")
+# Add audio recording section
+st.subheader("How are you feeling today?")
+wav_audio_data = st_audiorec()
+
+if wav_audio_data is not None:
+    st.success("Audio recorded successfully!")
+    st.audio(wav_audio_data, format='audio/wav')
+    
+    # Store audio transcript in session state
+    st.write("Attempting to transcribe audio...")
+    transcript = transcribe_audio(wav_audio_data)
+    if transcript:
+        st.session_state.current_transcript = transcript
+        st.session_state.audio_processed = True
+        st.success(f"Transcription: {transcript}")
+    else:
+        st.error("Transcription failed")
+
+# Add a button to trigger recommendations
+if st.session_state.audio_processed:
+    if st.button("Get Recommendations"):
+        # Display recommended posts with audio context
+        recommended_posts = get_recommended_posts(
+            st.session_state.username,
+            audio_transcript=st.session_state.current_transcript
+        )
+
+        if not recommended_posts.empty:
+            for _, row in recommended_posts.iterrows():
+                st.markdown(f"**{row['user']}** at {row['timestamp']}")
+                st.write(row['content'])
+                st.markdown(f"👍 {row['like_count']} likes")
+                
+                if st.button(f"Like", key=f"like_{row['post_id']}"):
+                    add_interaction(st.session_state.username, row['post_id'], 'like')
+                    st.success("Post liked!")
+                    st.rerun()
+                st.markdown("---")
+        else:
+            st.info("No recommendations available. Try recording how you feel or liking some posts!")
 else:
-    st.info("No recommendations available. Try liking some posts!")
+    st.info("Please record your feelings first to get personalized recommendations!")
