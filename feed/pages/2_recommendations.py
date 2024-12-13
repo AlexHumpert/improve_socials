@@ -90,7 +90,8 @@ Today's Feelings: {audio_transcript if audio_transcript else 'No audio recording
         )
         
         user_aspirations = response.choices[0].message.content
-        return user_aspirations
+        st.write(user_aspirations)
+        print(f"")
     
     except Exception as e:
         print(f"Error in LLM recommendation: {str(e)}")
@@ -235,7 +236,6 @@ def get_recommended_posts(username, num_recommendations=5, audio_transcript=None
     return final_recommendations
 
 
-
 # Check if user is logged in
 if not st.session_state.get('logged_in', False):
     st.warning("Please log in to access this page.")
@@ -279,6 +279,7 @@ if st.session_state.audio_processed:
 
         if not recommended_posts.empty:
             for _, row in recommended_posts.iterrows():
+                st.write("Here are the recommended posts")
                 st.markdown(f"**{row['user']}** at {row['timestamp']}")
                 st.write(row['content'])
                 st.markdown(f"👍 {row['like_count']} likes")
