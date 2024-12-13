@@ -45,7 +45,7 @@ def infer_aspirations_from_bio(username, user_bio):
     system_prompt = """You are an experienced life coach who works with clients to support them in their journeys to manifest their live goals.
     Your task is to identify aspirational goals from the information your clients give you."""
 
-    user_prompt = f"""Based on this user's bio: identify aspirational goals.
+    user_prompt = f"""Based on this client's biography, identify aspirational goals.
 
 User: {username if username else 'No bio provided'}
 User Bio: {user_bio if user_bio else 'No bio provided'}"""
