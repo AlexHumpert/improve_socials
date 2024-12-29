@@ -180,11 +180,10 @@ If there are fewer posts available than requested, return all available relevant
 
 def get_recommended_posts(username, num_recommendations=5, audio_transcript=None):
     """
-    Get recommended posts for a user.
+    Get recommended posts for a user, with optional audio context
     """
     # Load all posts
     posts_df = load_posts_df()
-    print(f"Total posts loaded: {len(posts_df)}")
     
     # Get user profile to access bio
     conn = sqlite3.connect('newsfeed.db')
@@ -194,17 +193,15 @@ def get_recommended_posts(username, num_recommendations=5, audio_transcript=None
     conn.close()
     
     if not result:
-        print(f"No user profile found for username: {username}")
         return pd.DataFrame()
         
     user_bio = result[0]
-    print(f"Retrieved user bio: {user_bio}")
     
-    # Define user aspiration
+    # Get user aspirations (now handles None audio_transcript)
     user_aspirations = infer_aspirations_from_bio(
         username=username,
         user_bio=user_bio,
-        audio_transcript=audio_transcript  # Changed from transcript to audio_transcript
+        audio_transcript=audio_transcript
     )
 
     # Get LLM recommendations
@@ -217,21 +214,16 @@ def get_recommended_posts(username, num_recommendations=5, audio_transcript=None
     )
     
     if recommended_posts.empty:
-        print("No recommendations returned from LLM")
         return pd.DataFrame()
     
-    # Get like counts for recommended posts
+    # Add like counts
     like_counts = get_likes_count()
     like_counts_df = pd.DataFrame(like_counts, columns=['post_id', 'like_count'])
-    
-    # Merge recommendations with like counts
     final_recommendations = recommended_posts.merge(
         like_counts_df, 
         on='post_id', 
         how='left'
     )
-    
-    # Fill NaN like counts with 0
     final_recommendations['like_count'] = final_recommendations['like_count'].fillna(0)
     return final_recommendations
 
@@ -250,46 +242,44 @@ if 'audio_processed' not in st.session_state:
 if 'current_transcript' not in st.session_state:
     st.session_state.current_transcript = None
 
-# Add audio recording section
-st.subheader("How are you feeling today?")
-wav_audio_data = st_audiorec()
 
-if wav_audio_data is not None:
-    st.success("Audio recorded successfully!")
-    st.audio(wav_audio_data, format='audio/wav')
+# Audio recording section (now optional)
+with st.expander("Share How You're Feeling (Optional)"):
+    st.write("Recording your feelings can help us provide better recommendations!")
+    wav_audio_data = st_audiorec()
     
-    # Store audio transcript in session state
-    st.write("Attempting to transcribe audio...")
-    transcript = transcribe_audio(wav_audio_data)
-    if transcript:
-        st.session_state.current_transcript = transcript
-        st.session_state.audio_processed = True
-        st.success(f"Transcription: {transcript}")
-    else:
-        st.error("Transcription failed")
-
-# Add a button to trigger recommendations
-if st.session_state.audio_processed:
-    if st.button("Get Recommendations"):
-        # Display recommended posts with audio context
-        recommended_posts = get_recommended_posts(
-            st.session_state.username,
-            audio_transcript=st.session_state.current_transcript
-        )
-
-        if not recommended_posts.empty:
-            for _, row in recommended_posts.iterrows():
-                st.write("Here are the recommended posts")
-                st.markdown(f"**{row['user']}** at {row['timestamp']}")
-                st.write(row['content'])
-                st.markdown(f"👍 {row['like_count']} likes")
-                
-                if st.button(f"Like", key=f"like_{row['post_id']}"):
-                    add_interaction(st.session_state.username, row['post_id'], 'like')
-                    st.success("Post liked!")
-                    st.rerun()
-                st.markdown("---")
+    if wav_audio_data is not None:
+        st.success("Audio recorded successfully!")
+        st.audio(wav_audio_data, format='audio/wav')
+        
+        st.write("Transcribing audio...")
+        transcript = transcribe_audio(wav_audio_data)
+        if transcript:
+            st.session_state.current_transcript = transcript
+            st.success(f"Transcription: {transcript}")
         else:
-            st.info("No recommendations available. Try recording how you feel or liking some posts!")
-else:
-    st.info("Please record your feelings first to get personalized recommendations!")
+            st.error("Transcription failed")
+    else:
+        st.session_state.current_transcript = None
+
+
+# Get Recommendations button (now always available)
+if st.button("Get Recommendations"):
+    recommended_posts = get_recommended_posts(
+        st.session_state.username,
+        audio_transcript=st.session_state.get('current_transcript')
+    )
+
+    if not recommended_posts.empty:
+        for _, row in recommended_posts.iterrows():
+            st.markdown(f"**{row['user']}** at {row['timestamp']}")
+            st.write(row['content'])
+            st.markdown(f"👍 {row['like_count']} likes")
+            
+            if st.button(f"Like", key=f"like_{row['post_id']}"):
+                add_interaction(st.session_state.username, row['post_id'], 'like')
+                st.success("Post liked!")
+                st.rerun()
+            st.markdown("---")
+    else:
+        st.info("No recommendations available at the moment. Try updating your profile or interacting with more posts!")
