@@ -13,26 +13,55 @@ import pandas as pd
 import sqlite3
 import tempfile
 from st_audiorec import st_audiorec
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+from functools import lru_cache
 
 
 
 # Load environment variables
 load_dotenv(override=True)
 
-# Get API key
-api_key = os.getenv('OPENAI_API_KEY')
+# Get API keys
+openai_api_key = os.getenv('OPENAI_API_KEY')
+youtube_api_key = os.getenv('YOUTUBE_API_KEY')
 
-# Check if API key is in Streamlit secrets
-if not api_key and 'OPENAI_API_KEY' in st.secrets:
-    api_key = st.secrets['OPENAI_API_KEY']
+# Check if API keys are in Streamlit secrets
+if not openai_api_key and 'OPENAI_API_KEY' in st.secrets:
+    openai_api_key = st.secrets['OPENAI_API_KEY']
+if not youtube_api_key and 'YOUTUBE_API_KEY' in st.secrets:
+    youtube_api_key = st.secrets['YOUTUBE_API_KEY']
 
 # Final check and client initialization
-if not api_key:
+if not openai_api_key:
     st.error("OpenAI API key not found. Please check your .env file or Streamlit secrets.")
     st.stop()
 
-# Initialize OpenAI client at the module level
-client = OpenAI(api_key=api_key)
+# Initialize OpenAI client
+client = OpenAI(api_key=openai_api_key)
+
+# Initialize YouTube client if API key is available
+youtube_client = None
+if youtube_api_key:
+    try:
+        youtube_client = build('youtube', 'v3', developerKey=youtube_api_key)
+    except Exception as e:
+        print(f"Error initializing YouTube client: {str(e)}")
+
+@lru_cache()
+def get_youtube_client():
+    """Initialize and return YouTube client with caching"""
+    youtube_api_key = os.getenv('YOUTUBE_API_KEY')
+    if not youtube_api_key and 'YOUTUBE_API_KEY' in st.secrets:
+        youtube_api_key = st.secrets['YOUTUBE_API_KEY']
+        
+    if youtube_api_key:
+        try:
+            return build('youtube', 'v3', developerKey=youtube_api_key)
+        except Exception as e:
+            print(f"Error initializing YouTube client: {str(e)}")
+            return None
+    return None
 
 def load_posts_df():
     posts = get_posts()
@@ -66,7 +95,6 @@ def transcribe_audio(audio_data):
         st.error(f"Error transcribing audio: {str(e)}")
         return None
 
-
 def infer_aspirations_from_bio(username, user_bio, audio_transcript=None):
     """Infer information from bio and audio transcript"""
     
@@ -92,6 +120,7 @@ Today's Feelings: {audio_transcript if audio_transcript else 'No audio recording
         user_aspirations = response.choices[0].message.content
         st.write(user_aspirations)
         print(f"")
+        return user_aspirations
     
     except Exception as e:
         print(f"Error in LLM recommendation: {str(e)}")
@@ -178,14 +207,67 @@ If there are fewer posts available than requested, return all available relevant
         print(f"Error in LLM recommendation: {str(e)}")
         return pd.DataFrame()
 
+def get_youtube_recommendations(user_aspirations, max_results=3):
+    """Get relevant YouTube content based on user aspirations"""
+    youtube_client = get_youtube_client()
+    
+    print(f"Debug - YouTube received aspirations: {user_aspirations}")  # Debug print
+    
+    if not youtube_client:
+        print("YouTube client not initialized")
+        return pd.DataFrame()
+        
+    try:
+        # Extract key terms from aspirations for better search
+        search_terms = [
+            line.strip().split('.')[1].strip() 
+            for line in user_aspirations.split('\n') 
+            if line.strip() and '.' in line
+        ]
+        
+        # Take the first two terms for a focused search
+        search_query = ' OR '.join(search_terms[:2])[:128]
+        print(f"Debug - YouTube search query: {search_query}")  # Debug print
+        
+        # Call YouTube API
+        request = youtube_client.search().list(
+            part="snippet",
+            q=search_query,
+            type="video",
+            maxResults=max_results,
+            relevanceLanguage="en",
+            safeSearch="moderate"
+        )
+        response = request.execute()
+        
+        # Transform to DataFrame
+        videos = []
+        for item in response['items']:
+            video = {
+                'post_id': f"yt_{item['id']['videoId']}",
+                'user': item['snippet']['channelTitle'],
+                'content': (f"🎥 **{item['snippet']['title']}**\n\n"
+                          f"{item['snippet']['description'][:200]}...\n\n"
+                          f"📺 [Watch on YouTube](https://youtube.com/watch?v={item['id']['videoId']})"),
+                'timestamp': item['snippet']['publishedAt'],
+                'platform': 'youtube'
+            }
+            videos.append(video)
+            
+        return pd.DataFrame(videos)
+        
+    except Exception as e:
+        print(f"Error in YouTube recommendations: {str(e)}")
+        return pd.DataFrame()
+
 def get_recommended_posts(username, num_recommendations=5, audio_transcript=None):
     """
-    Get recommended posts for a user, with optional audio context
+    Get recommended posts for a user, including YouTube content and audio context
     """
     # Load all posts
     posts_df = load_posts_df()
     
-    # Get user profile to access bio
+    # Get user profile
     conn = sqlite3.connect('newsfeed.db')
     c = conn.cursor()
     c.execute("SELECT bio FROM users WHERE username = ?", (username,))
@@ -197,34 +279,56 @@ def get_recommended_posts(username, num_recommendations=5, audio_transcript=None
         
     user_bio = result[0]
     
-    # Get user aspirations (now handles None audio_transcript)
+    # Get user aspirations with audio context and store it
     user_aspirations = infer_aspirations_from_bio(
         username=username,
         user_bio=user_bio,
         audio_transcript=audio_transcript
     )
-
-    # Get LLM recommendations
-    recommended_posts = get_llm_recommended_posts(
+    
+    print(f"Debug - Initial user_aspirations: {user_aspirations}")  # Debug print
+    
+    # Get platform recommendations
+    platform_recommendations = get_llm_recommended_posts(
         username=username,
-        user_aspirations=user_aspirations,
+        user_aspirations=user_aspirations,  # Pass the actual aspirations
         user_bio=user_bio,
         posts_df=posts_df,
-        num_recommendations=num_recommendations
+        num_recommendations=max(2, num_recommendations - 3)
     )
     
-    if recommended_posts.empty:
+    # Add platform identifier
+    if not platform_recommendations.empty:
+        platform_recommendations['platform'] = 'platform'
+    
+    print(f"Debug - Before YouTube recommendations - user_aspirations: {user_aspirations}")  # Debug print
+    
+    # Get YouTube recommendations with the same aspirations
+    youtube_recommendations = get_youtube_recommendations(
+        user_aspirations=user_aspirations,  # Pass the same aspirations
+        max_results=min(3, num_recommendations - len(platform_recommendations))
+    )
+    
+    # Combine recommendations
+    all_recommendations = pd.concat(
+        [platform_recommendations, youtube_recommendations],
+        ignore_index=True
+    )
+    
+    if all_recommendations.empty:
         return pd.DataFrame()
     
-    # Add like counts
+    # Add like counts for platform posts only
     like_counts = get_likes_count()
     like_counts_df = pd.DataFrame(like_counts, columns=['post_id', 'like_count'])
-    final_recommendations = recommended_posts.merge(
+    
+    final_recommendations = all_recommendations.merge(
         like_counts_df, 
         on='post_id', 
         how='left'
     )
     final_recommendations['like_count'] = final_recommendations['like_count'].fillna(0)
+    
     return final_recommendations
 
 
@@ -233,17 +337,15 @@ if not st.session_state.get('logged_in', False):
     st.warning("Please log in to access this page.")
     st.stop()
 
-# After the login check and before the audio recording section:
 st.title("Recommendations")
 
-# Initialize session state for handling audio flow
+# Initialize session state for audio
 if 'audio_processed' not in st.session_state:
     st.session_state.audio_processed = False
 if 'current_transcript' not in st.session_state:
     st.session_state.current_transcript = None
 
-
-# Audio recording section (now optional)
+# Audio recording section
 with st.expander("Share How You're Feeling (Optional)"):
     st.write("Recording your feelings can help us provide better recommendations!")
     wav_audio_data = st_audiorec()
@@ -262,8 +364,7 @@ with st.expander("Share How You're Feeling (Optional)"):
     else:
         st.session_state.current_transcript = None
 
-
-# Get Recommendations button (now always available)
+# Get Recommendations button
 if st.button("Get Recommendations"):
     recommended_posts = get_recommended_posts(
         st.session_state.username,
@@ -272,14 +373,21 @@ if st.button("Get Recommendations"):
 
     if not recommended_posts.empty:
         for _, row in recommended_posts.iterrows():
-            st.markdown(f"**{row['user']}** at {row['timestamp']}")
-            st.write(row['content'])
-            st.markdown(f"👍 {row['like_count']} likes")
+            # Display platform-specific header
+            if row['platform'] == 'youtube':
+                st.markdown(f"🎥 **{row['user']}** on YouTube at {row['timestamp']}")
+            else:
+                st.markdown(f"**{row['user']}** at {row['timestamp']}")
             
-            if st.button(f"Like", key=f"like_{row['post_id']}"):
-                add_interaction(st.session_state.username, row['post_id'], 'like')
-                st.success("Post liked!")
-                st.rerun()
+            st.write(row['content'])
+            
+            # Only show like button for platform posts
+            if row['platform'] == 'platform':
+                st.markdown(f"👍 {row['like_count']} likes")
+                if st.button(f"Like", key=f"like_{row['post_id']}"):
+                    add_interaction(st.session_state.username, row['post_id'], 'like')
+                    st.success("Post liked!")
+                    st.rerun()
             st.markdown("---")
     else:
         st.info("No recommendations available at the moment. Try updating your profile or interacting with more posts!")
