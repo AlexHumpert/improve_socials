@@ -68,7 +68,6 @@ def load_posts_df():
     df = pd.DataFrame(posts, columns=['post_id', 'user', 'content', 'timestamp'])
     return df
 
-
 def transcribe_audio(audio_data):
     """Transcribe audio using OpenAI Whisper API."""
     if audio_data is None:
@@ -225,11 +224,9 @@ def get_youtube_recommendations(user_aspirations, max_results=3):
             if line.strip() and '.' in line
         ]
         
-        # Take the first two terms for a focused search
-        search_query = ' OR '.join(search_terms[:2])[:128]
-        print(f"Debug - YouTube search query: {search_query}")  # Debug print
         
         # Call YouTube API
+        search_query = ' OR '.join(search_terms[:1])
         request = youtube_client.search().list(
             part="snippet",
             q=search_query,
